@@ -1,8 +1,9 @@
-name: spiderman_sentiment_ci
+name: spiderman-sentiment-ci
 
-conda_env: conda.yaml
+# Penting: pakai environment yang sudah aktif (dari GitHub Actions),
+# jangan bikin/aktifkan conda env baru lagi.
+env_manager: local
 
 entry_points:
   main:
     command: "python modelling.py"
-
