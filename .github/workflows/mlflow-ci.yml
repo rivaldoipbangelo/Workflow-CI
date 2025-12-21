@@ -54,7 +54,7 @@ jobs:
         ls -la mlruns/ || echo "No mlruns yet"
         echo ""
         echo "=== MLruns detailed structure ==="
-        find mlruns/ -type f -o -type d | head -50 || echo "Cannot list mlruns"
+        tree mlruns/ -L 3 || find mlruns/ -maxdepth 3 -type d
     
     - name: Upload model artifacts to GitHub
       if: success()
@@ -79,60 +79,71 @@ jobs:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
     
-    - name: Find latest MLflow run (IMPROVED)
+    - name: Find latest MLflow run (FIXED for Long Experiment IDs)
       id: find_run
       run: |
         echo "🔍 Searching for latest MLflow run..."
         
-        # Cari semua kemungkinan experiment directories
         FOUND=false
+        MODEL_PATH=""
+        EXPERIMENT_ID=""
+        RUN_ID=""
         
-        # Check experiment directories (bisa 0, 1, 2, dst)
-        for exp_id in {0..9}; do
-          EXP_DIR="mlruns/$exp_id"
+        # Cari semua directories di mlruns/ (termasuk yang numeric panjang)
+        for exp_dir in mlruns/*/; do
+          exp_dir=${exp_dir%/}  # Remove trailing slash
+          exp_name=$(basename "$exp_dir")
           
-          if [ -d "$EXP_DIR" ]; then
-            echo "📁 Found experiment directory: $EXP_DIR"
-            
-            # List semua subdirectories kecuali meta.yaml dan .trash
-            RUN_DIRS=$(find "$EXP_DIR" -mindepth 1 -maxdepth 1 -type d ! -name '.trash' | sort -r)
-            
-            if [ -n "$RUN_DIRS" ]; then
-              # Ambil run directory pertama (terbaru)
-              RUN_DIR=$(echo "$RUN_DIRS" | head -n 1)
-              RUN_ID=$(basename "$RUN_DIR")
-              
-              echo "✅ Found Run Directory: $RUN_DIR"
-              echo "✅ Run ID: $RUN_ID"
-              
-              # Verify model artifacts exist
-              MODEL_PATH="$RUN_DIR/artifacts/model"
-              
-              if [ -d "$MODEL_PATH" ]; then
-                echo "✅ Model artifacts found at: $MODEL_PATH"
-                echo "📦 Model contents:"
-                ls -la "$MODEL_PATH"
-                
-                # Set outputs
-                echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
-                echo "experiment_id=$exp_id" >> $GITHUB_OUTPUT
-                echo "model_path=$MODEL_PATH" >> $GITHUB_OUTPUT
-                
-                FOUND=true
-                break
-              else
-                echo "⚠️  Model not found in $MODEL_PATH, checking next run..."
-              fi
-            fi
+          # Skip jika cuma file meta.yaml
+          if [ "$exp_name" = "0" ] && [ ! -d "$exp_dir" ]; then
+            continue
           fi
+          
+          echo "📁 Checking experiment directory: $exp_dir"
+          
+          # Cari run directories (skip meta.yaml dan .trash)
+          for run_dir in "$exp_dir"/*/ ; do
+            run_dir=${run_dir%/}
+            run_name=$(basename "$run_dir")
+            
+            # Skip meta.yaml dan .trash
+            if [ "$run_name" = "meta.yaml" ] || [ "$run_name" = ".trash" ]; then
+              continue
+            fi
+            
+            # Check if model exists
+            if [ -d "$run_dir/artifacts/model" ]; then
+              echo "✅ Found model in: $run_dir"
+              
+              MODEL_PATH="$run_dir/artifacts/model"
+              EXPERIMENT_ID="$exp_name"
+              RUN_ID="$run_name"
+              
+              echo "📦 Model Path: $MODEL_PATH"
+              echo "📊 Experiment ID: $EXPERIMENT_ID"
+              echo "🔑 Run ID: $RUN_ID"
+              
+              # Verify model files
+              ls -la "$MODEL_PATH"
+              
+              FOUND=true
+              break 2  # Exit both loops
+            fi
+          done
         done
         
         if [ "$FOUND" = false ]; then
           echo "❌ No valid MLflow run with model artifacts found!"
-          echo "📂 MLruns structure:"
+          echo ""
+          echo "📂 Complete MLruns structure:"
           tree mlruns/ || find mlruns/ -type f -o -type d
           exit 1
         fi
+        
+        # Set outputs
+        echo "experiment_id=$EXPERIMENT_ID" >> $GITHUB_OUTPUT
+        echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+        echo "model_path=$MODEL_PATH" >> $GITHUB_OUTPUT
         
         echo "✅ MLflow run detection completed successfully!"
     
@@ -149,8 +160,11 @@ jobs:
         # Verify model URI exists
         if [ ! -d "$MODEL_URI" ]; then
           echo "❌ Model path does not exist: $MODEL_URI"
+          ls -la "mlruns/${{ steps.find_run.outputs.experiment_id }}/${{ steps.find_run.outputs.run_id }}/artifacts/"
           exit 1
         fi
+        
+        echo "✅ Model path verified, building Docker image..."
         
         # Build Docker image
         mlflow models build-docker \
