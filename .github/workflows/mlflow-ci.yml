@@ -1,43 +1,31 @@
-name: CI-Train-Model
+name: MLflow CI Pipeline
 
 on:
-  workflow_dispatch:
   push:
-    paths:
-      - 'MLProject/**'
-      - '.github/workflows/ci-train.yml'
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  train:
+  train-model:
     runs-on: ubuntu-latest
-
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Miniconda
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          activate-environment: mlflow-env
-          python-version: "3.10"
-          auto-activate-base: false
-
-      - name: Install MLflow and dependencies
-        shell: bash
-        run: |
-          conda install -y pip
-          pip install mlflow scikit-learn pandas numpy matplotlib
-
-      - name: Run MLflow Project
-        shell: bash
-        working-directory: MLProject
-        env:
-          MLFLOW_ENV_MANAGER: local
-        run: |
-          mlflow run . --env-manager local
-
-      - name: Upload MLflow artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: mlruns
-          path: MLProject/mlruns
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        pip install mlflow
+        pip install -r MLProject/requirements.txt || echo "No requirements.txt found"
+    
+    - name: Run MLflow Project
+      run: |
+        cd MLProject
+        mlflow run . --no-conda
