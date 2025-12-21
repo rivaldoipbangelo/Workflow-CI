@@ -14,18 +14,30 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
-    
+      
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
     
-    - name: Install dependencies
+    - name: Install MLflow and dependencies
       run: |
-        pip install mlflow
-        pip install -r MLProject/requirements.txt || echo "No requirements.txt found"
+        python -m pip install --upgrade pip
+        pip install mlflow scikit-learn pandas numpy joblib
     
-    - name: Run MLflow Project
+    - name: Run MLflow Project (without conda)
+      working-directory: ./MLProject
       run: |
-        cd MLProject
-        mlflow run . --no-conda
+        mlflow run . --env-manager=local
+      env:
+        MLFLOW_TRACKING_URI: file:../mlruns
+    
+    - name: Upload model artifacts
+      if: success()
+      uses: actions/upload-artifact@v3
+      with:
+        name: trained-model
+        path: |
+          MLProject/models/
+          mlruns/
+        retention-days: 30
