@@ -1,4 +1,4 @@
-name: ml_env
+name: ml_training_env
 channels:
   - conda-forge
   - defaults
@@ -6,10 +6,8 @@ dependencies:
   - python=3.9
   - pip
   - pip:
-      - mlflow
-      - scikit-learn
-      - pandas
-      - numpy
-      - joblib
-      - matplotlib
-      - seaborn
+      - mlflow==2.9.0
+      - scikit-learn==1.3.0
+      - pandas==2.0.0
+      - numpy==1.24.0
+      - joblib==1.3.0
