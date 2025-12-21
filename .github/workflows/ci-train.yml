@@ -30,8 +30,11 @@ jobs:
 
       - name: Run MLflow Project
         shell: bash
+        working-directory: MLProject
+        env:
+          MLFLOW_ENV_MANAGER: local
         run: |
-          mlflow run MLProject
+          mlflow run . --env-manager local
 
       - name: Upload MLflow artifacts
         uses: actions/upload-artifact@v4
