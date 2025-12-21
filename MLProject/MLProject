@@ -1,9 +1,12 @@
-name: spiderman-sentiment-ci
+name: ML_Training_Project
 
-# Penting: pakai environment yang sudah aktif (dari GitHub Actions),
-# jangan bikin/aktifkan conda env baru lagi.
-env_manager: local
+conda_env: conda.yaml
 
 entry_points:
   main:
-    command: "python modelling.py"
+    parameters:
+      data_path: {type: string, default: "dataset/data.csv"}
+      model_name: {type: string, default: "model"}
+      test_size: {type: float, default: 0.2}
+      random_state: {type: int, default: 42}
+    command: "python modelling.py --data_path {data_path} --model_name {model_name} --test_size {test_size} --random_state {random_state}"
