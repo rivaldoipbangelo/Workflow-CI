@@ -79,7 +79,7 @@ jobs:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
     
-    - name: Find latest MLflow run (FIXED for Long Experiment IDs)
+    - name: Find latest MLflow run
       id: find_run
       run: |
         echo "🔍 Searching for latest MLflow run..."
@@ -89,19 +89,14 @@ jobs:
         EXPERIMENT_ID=""
         RUN_ID=""
         
-        # Cari semua directories di mlruns/ (termasuk yang numeric panjang)
+        # Cari semua directories di mlruns/
         for exp_dir in mlruns/*/; do
-          exp_dir=${exp_dir%/}  # Remove trailing slash
+          exp_dir=${exp_dir%/}
           exp_name=$(basename "$exp_dir")
-          
-          # Skip jika cuma file meta.yaml
-          if [ "$exp_name" = "0" ] && [ ! -d "$exp_dir" ]; then
-            continue
-          fi
           
           echo "📁 Checking experiment directory: $exp_dir"
           
-          # Cari run directories (skip meta.yaml dan .trash)
+          # Cari run directories
           for run_dir in "$exp_dir"/*/ ; do
             run_dir=${run_dir%/}
             run_name=$(basename "$run_dir")
@@ -123,20 +118,18 @@ jobs:
               echo "📊 Experiment ID: $EXPERIMENT_ID"
               echo "🔑 Run ID: $RUN_ID"
               
-              # Verify model files
+              # List model files
+              echo "📋 Model files:"
               ls -la "$MODEL_PATH"
               
               FOUND=true
-              break 2  # Exit both loops
+              break 2
             fi
           done
         done
         
         if [ "$FOUND" = false ]; then
           echo "❌ No valid MLflow run with model artifacts found!"
-          echo ""
-          echo "📂 Complete MLruns structure:"
-          tree mlruns/ || find mlruns/ -type f -o -type d
           exit 1
         fi
         
@@ -145,34 +138,59 @@ jobs:
         echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
         echo "model_path=$MODEL_PATH" >> $GITHUB_OUTPUT
         
-        echo "✅ MLflow run detection completed successfully!"
+        echo "✅ MLflow run detection completed!"
     
-    - name: Build Docker Image with MLflow
+    - name: Create Dockerfile for MLflow Model
       run: |
-        echo "🐳 Building Docker image with MLflow..."
+        MODEL_PATH="${{ steps.find_run.outputs.model_path }}"
         
-        MODEL_URI="mlruns/${{ steps.find_run.outputs.experiment_id }}/${{ steps.find_run.outputs.run_id }}/artifacts/model"
+        cat > Dockerfile << 'EOF'
+        FROM python:3.9-slim
+        
+        # Set working directory
+        WORKDIR /app
+        
+        # Copy model artifacts
+        COPY $MODEL_PATH ./model
+        
+        # Install dependencies from model
+        RUN pip install --no-cache-dir mlflow scikit-learn pandas numpy
+        
+        # Copy requirements if exists
+        RUN if [ -f ./model/requirements.txt ]; then \
+              pip install --no-cache-dir -r ./model/requirements.txt; \
+            fi
+        
+        # Expose port
+        EXPOSE 8080
+        
+        # Set environment variables
+        ENV MLFLOW_TRACKING_URI=""
+        ENV DISABLE_NGINX=true
+        
+        # Run MLflow model server
+        CMD ["mlflow", "models", "serve", "-m", "./model", "-h", "0.0.0.0", "-p", "8080", "--no-conda"]
+        EOF
+        
+        echo "✅ Dockerfile created"
+        cat Dockerfile
+        
+        # Replace $MODEL_PATH with actual path
+        sed -i "s|\$MODEL_PATH|$MODEL_PATH|g" Dockerfile
+        
+        echo "✅ Dockerfile with model path:"
+        cat Dockerfile
+    
+    - name: Build Docker Image
+      run: |
         IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/spiderman-review-model"
         
-        echo "📦 Model URI: $MODEL_URI"
-        echo "🏷️  Image Name: $IMAGE_NAME:latest"
+        echo "🐳 Building Docker image: $IMAGE_NAME:latest"
         
-        # Verify model URI exists
-        if [ ! -d "$MODEL_URI" ]; then
-          echo "❌ Model path does not exist: $MODEL_URI"
-          ls -la "mlruns/${{ steps.find_run.outputs.experiment_id }}/${{ steps.find_run.outputs.run_id }}/artifacts/"
-          exit 1
-        fi
-        
-        echo "✅ Model path verified, building Docker image..."
-        
-        # Build Docker image
-        mlflow models build-docker \
-          -m "$MODEL_URI" \
-          -n "$IMAGE_NAME:latest" \
-          --enable-mlserver
+        docker build -t $IMAGE_NAME:latest .
         
         echo "✅ Docker image built successfully!"
+        docker images | grep spiderman-review-model
     
     - name: Tag Docker Image
       run: |
@@ -181,7 +199,7 @@ jobs:
         # Tag dengan build number
         docker tag $IMAGE_NAME:latest $IMAGE_NAME:build-${{ github.run_number }}
         
-        # Tag dengan commit SHA (pendek)
+        # Tag dengan commit SHA
         docker tag $IMAGE_NAME:latest $IMAGE_NAME:${GITHUB_SHA::7}
         
         echo "✅ Docker image tagged:"
@@ -193,7 +211,7 @@ jobs:
         
         echo "🚀 Pushing Docker images to Docker Hub..."
         
-        # Push semua tags
+        # Push all tags
         docker push $IMAGE_NAME:latest
         docker push $IMAGE_NAME:build-${{ github.run_number }}
         docker push $IMAGE_NAME:${GITHUB_SHA::7}
@@ -234,7 +252,7 @@ jobs:
         📊 Predict Command (example):
         curl -X POST http://localhost:8080/invocations \\
           -H "Content-Type: application/json" \\
-          -d '{"dataframe_split": {"columns": ["feature_0", "feature_1"], "data": [[1.0, 2.0]]}}'
+          -d '{"inputs": [[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]]}'
         
         ========================================
         Build Information:
@@ -245,6 +263,9 @@ jobs:
         - MLflow Experiment ID: ${{ steps.find_run.outputs.experiment_id }}
         - MLflow Run ID: ${{ steps.find_run.outputs.run_id }}
         ========================================
+        
+        Note: This Docker image was built manually from MLflow model artifacts.
+        The model is served using 'mlflow models serve' command.
         EOF
         
         cat docker-hub-info.txt
