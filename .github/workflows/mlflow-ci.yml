@@ -43,9 +43,9 @@ jobs:
     - name: Run training via MLflow Project
       run: |
         echo "🚀 Running training via MLflow Project..."
-        mlflow run ./MLProject -e main --env-manager=local
+        mlflow run ./MLProject -e main --env-manager=local --experiment-name Spiderman_Review_Classification
       env:
-        MLFLOW_TRACKING_URI: file:${{ github.workspace }}/mlruns
+        MLFLOW_TRACKING_URI: file:${{ github.workspace }}/mlruns 
     
     - name: Verify model output and MLflow structure
       run: |
