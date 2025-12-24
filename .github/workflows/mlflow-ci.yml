@@ -1,4 +1,4 @@
-name: MLflow CI/CD Pipeline with Docker
+name: MLflow CI/CD Pipeline with Docker (YouTube Comment)
 
 on:
   push:
@@ -10,23 +10,37 @@ on:
 jobs:
   train-and-deploy:
     runs-on: ubuntu-latest
-    
+
+    env:
+      # ✅ Dataset YouTube Comment (sesuai yang kamu kirim)
+      DATASET_DIR: MLProject/youtube_comment_preprocessing
+      DATASET_FILE: youtube_comment_preprocessed.csv
+      DATASET_PATH_REPO: MLProject/youtube_comment_preprocessing/youtube_comment_preprocessed.csv
+
+      # ✅ Saat mlflow run ./MLProject, working dir = MLProject/
+      DATASET_PATH_PROJECT: youtube_comment_preprocessing/youtube_comment_preprocessed.csv
+
+      EXPERIMENT_NAME: youtube_comment_classification
+
+      # ✅ Ganti nama image biar sesuai project
+      IMAGE_NAME: youtube-comment-model
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.9'
-    
+
     - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y tree
         python -m pip install --upgrade pip
-        pip install mlflow==2.9.0 scikit-learn==1.3.0 pandas==2.0.0 numpy==1.24.0 joblib==1.3.0
-    
+        pip install mlflow==2.9.0 scikit-learn==1.3.0 pandas==2.0.0 numpy==1.24.0 scipy==1.10.1 joblib==1.3.0
+
     - name: Verify directory structure
       run: |
         echo "=== Current directory ==="
@@ -36,17 +50,25 @@ jobs:
         echo "=== MLProject directory ==="
         ls -la MLProject/
         echo ""
-        echo "=== Dataset directory ==="
-        ls -la MLProject/spiderman_youtube_review_preprocessing/ || echo "No dataset folder"
-    
-    # ✅ REVISI UTAMA: jalankan training via MLflow Project (mlflow run), bukan python modelling.py langsung
+        echo "=== Dataset directory (YouTube Comment) ==="
+        ls -la "${DATASET_DIR}" || (echo "❌ Dataset folder not found: ${DATASET_DIR}" && exit 1)
+        echo ""
+        echo "=== Dataset file (YouTube Comment) ==="
+        ls -la "${DATASET_PATH_REPO}" || (echo "❌ Dataset file not found: ${DATASET_PATH_REPO}" && exit 1)
+        echo ""
+        echo "=== Dataset preview (first 5 lines) ==="
+        head -n 5 "${DATASET_PATH_REPO}" || true
+
+    # ✅ Training via MLflow Project
     - name: Run training via MLflow Project
       run: |
         echo "🚀 Running training via MLflow Project..."
-        mlflow run ./MLProject -e main --env-manager=local --experiment-name Spiderman_Review_Classification
+        echo "Using dataset (project-relative): ${DATASET_PATH_PROJECT}"
+        mlflow run ./MLProject -e main --env-manager=local --experiment-name "${EXPERIMENT_NAME}"
       env:
-        MLFLOW_TRACKING_URI: file:${{ github.workspace }}/mlruns 
-    
+        MLFLOW_TRACKING_URI: file:${{ github.workspace }}/mlruns
+        DATASET_PATH: ${{ env.DATASET_PATH_PROJECT }}
+
     - name: Verify model output and MLflow structure
       run: |
         echo "=== Models directory ==="
@@ -57,7 +79,7 @@ jobs:
         echo ""
         echo "=== MLruns detailed structure ==="
         tree mlruns/ -L 3 || find mlruns/ -maxdepth 3 -type d
-    
+
     - name: Upload model artifacts to GitHub
       if: success()
       uses: actions/upload-artifact@v4
@@ -67,195 +89,170 @@ jobs:
           MLProject/models/
           mlruns/
         retention-days: 30
-    
+
     # ==========================================
-    # DOCKER BUILD & PUSH (UNTUK 4 POIN)
+    # DOCKER BUILD & PUSH
     # ==========================================
-    
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-    
+
     - name: Login to Docker Hub
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
-    
+
     - name: Find latest MLflow run
       id: find_run
       run: |
         echo "🔍 Searching for latest MLflow run..."
-        
+
         FOUND=false
         MODEL_PATH=""
         EXPERIMENT_ID=""
         RUN_ID=""
-        
-        # Cari semua directories di mlruns/
+
         for exp_dir in mlruns/*/; do
           exp_dir=${exp_dir%/}
           exp_name=$(basename "$exp_dir")
-          
+
           echo "📁 Checking experiment directory: $exp_dir"
-          
-          # Cari run directories
+
           for run_dir in "$exp_dir"/*/ ; do
             run_dir=${run_dir%/}
             run_name=$(basename "$run_dir")
-            
-            # Skip meta.yaml dan .trash
+
             if [ "$run_name" = "meta.yaml" ] || [ "$run_name" = ".trash" ]; then
               continue
             fi
-            
-            # Check if model exists
+
             if [ -d "$run_dir/artifacts/model" ]; then
               echo "✅ Found model in: $run_dir"
-              
+
               MODEL_PATH="$run_dir/artifacts/model"
               EXPERIMENT_ID="$exp_name"
               RUN_ID="$run_name"
-              
+
               echo "📦 Model Path: $MODEL_PATH"
               echo "📊 Experiment ID: $EXPERIMENT_ID"
               echo "🔑 Run ID: $RUN_ID"
-              
-              # List model files
+
               echo "📋 Model files:"
               ls -la "$MODEL_PATH"
-              
+
               FOUND=true
               break 2
             fi
           done
         done
-        
+
         if [ "$FOUND" = false ]; then
           echo "❌ No valid MLflow run with model artifacts found!"
           exit 1
         fi
-        
-        # Set outputs
+
         echo "experiment_id=$EXPERIMENT_ID" >> $GITHUB_OUTPUT
         echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
         echo "model_path=$MODEL_PATH" >> $GITHUB_OUTPUT
-        
+
         echo "✅ MLflow run detection completed!"
-    
+
     - name: Create Dockerfile for MLflow Model
       run: |
         MODEL_PATH="${{ steps.find_run.outputs.model_path }}"
-        
+
         cat > Dockerfile << 'EOF'
         FROM python:3.9-slim
-        
-        # Set working directory
+
         WORKDIR /app
-        
-        # Copy model artifacts
+
         COPY $MODEL_PATH ./model
-        
-        # Install dependencies from model
-        RUN pip install --no-cache-dir mlflow scikit-learn pandas numpy
-        
-        # Copy requirements if exists
+
+        RUN pip install --no-cache-dir mlflow scikit-learn pandas numpy scipy joblib
+
         RUN if [ -f ./model/requirements.txt ]; then \
               pip install --no-cache-dir -r ./model/requirements.txt; \
             fi
-        
-        # Expose port
+
         EXPOSE 8080
-        
-        # Set environment variables
+
         ENV MLFLOW_TRACKING_URI=""
         ENV DISABLE_NGINX=true
-        
-        # Run MLflow model server
+
         CMD ["mlflow", "models", "serve", "-m", "./model", "-h", "0.0.0.0", "-p", "8080", "--no-conda"]
         EOF
-        
+
         echo "✅ Dockerfile created"
         cat Dockerfile
-        
-        # Replace $MODEL_PATH with actual path
+
         sed -i "s|\$MODEL_PATH|$MODEL_PATH|g" Dockerfile
-        
+
         echo "✅ Dockerfile with model path:"
         cat Dockerfile
-    
+
     - name: Build Docker Image
       run: |
-        IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/spiderman-review-model"
-        
+        IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}"
+
         echo "🐳 Building Docker image: $IMAGE_NAME:latest"
-        
         docker build -t $IMAGE_NAME:latest .
-        
+
         echo "✅ Docker image built successfully!"
-        docker images | grep spiderman-review-model
-    
+        docker images | grep "${{ env.IMAGE_NAME }}" || true
+
     - name: Tag Docker Image
       run: |
-        IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/spiderman-review-model"
-        
-        # Tag dengan build number
+        IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}"
+
         docker tag $IMAGE_NAME:latest $IMAGE_NAME:build-${{ github.run_number }}
-        
-        # Tag dengan commit SHA
         docker tag $IMAGE_NAME:latest $IMAGE_NAME:${GITHUB_SHA::7}
-        
+
         echo "✅ Docker image tagged:"
-        docker images | grep spiderman-review-model
-    
+        docker images | grep "${{ env.IMAGE_NAME }}" || true
+
     - name: Push Docker Image to Docker Hub
       run: |
-        IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/spiderman-review-model"
-        
+        IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}"
+
         echo "🚀 Pushing Docker images to Docker Hub..."
-        
-        # Push all tags
         docker push $IMAGE_NAME:latest
         docker push $IMAGE_NAME:build-${{ github.run_number }}
         docker push $IMAGE_NAME:${GITHUB_SHA::7}
-        
+
         echo "✅ All images pushed successfully!"
-    
+
     - name: Create Docker Hub Info File
       run: |
-        IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/spiderman-review-model"
-        
+        IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}"
+
         cat > docker-hub-info.txt << EOF
         ========================================
         🐳 DOCKER HUB DEPLOYMENT INFORMATION
         ========================================
-        
+
         ✅ Docker Image Successfully Pushed!
-        
+
         📦 Image Repository:
         https://hub.docker.com/r/$IMAGE_NAME
-        
+
         🔗 Direct Link:
         https://hub.docker.com/repository/docker/$IMAGE_NAME/general
-        
+
         🏷️  Available Tags:
         - latest
         - build-${{ github.run_number }}
         - ${GITHUB_SHA::7}
-        
+
         📥 Pull Command:
         docker pull $IMAGE_NAME:latest
-        
+
         🚀 Run Command:
         docker run -p 8080:8080 $IMAGE_NAME:latest
-        
+
         🔗 Test Endpoint:
         curl http://localhost:8080/ping
-        
-        📊 Predict Command (example):
-        curl -X POST http://localhost:8080/invocations \\
-          -H "Content-Type: application/json" \\
-          -d '{"inputs": [[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]]}'
-        
+
         ========================================
         Build Information:
         - GitHub Run: ${{ github.run_number }}
@@ -265,23 +262,26 @@ jobs:
         - MLflow Experiment ID: ${{ steps.find_run.outputs.experiment_id }}
         - MLflow Run ID: ${{ steps.find_run.outputs.run_id }}
         ========================================
-        
+
         Note: This Docker image was built manually from MLflow model artifacts.
         The model is served using 'mlflow models serve' command.
         EOF
-        
+
         cat docker-hub-info.txt
-    
+
     - name: Upload Docker Hub Info
       uses: actions/upload-artifact@v4
       with:
         name: docker-hub-info-${{ github.run_number }}
         path: docker-hub-info.txt
         retention-days: 90
-    
+
     - name: Summary
       run: |
         echo "## 🎉 CI/CD Pipeline Completed Successfully!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### ✅ Dataset Used:" >> $GITHUB_STEP_SUMMARY
+        echo "- ${{ env.DATASET_PATH_REPO }}" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### ✅ Artifacts Created:" >> $GITHUB_STEP_SUMMARY
         echo "- 📦 Trained Model (GitHub Artifacts)" >> $GITHUB_STEP_SUMMARY
@@ -292,11 +292,9 @@ jobs:
         echo "- Run ID: ${{ steps.find_run.outputs.run_id }}" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 🐳 Docker Hub:" >> $GITHUB_STEP_SUMMARY
-        echo "**Repository:** https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/spiderman-review-model" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Direct Link:** https://hub.docker.com/repository/docker/${{ secrets.DOCKER_USERNAME }}/spiderman-review-model/general" >> $GITHUB_STEP_SUMMARY
+        echo "**Repository:** https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📥 Pull Command:" >> $GITHUB_STEP_SUMMARY
         echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-        echo "docker pull ${{ secrets.DOCKER_USERNAME }}/spiderman-review-model:latest" >> $GITHUB_STEP_SUMMARY
+        echo "docker pull ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
         echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
