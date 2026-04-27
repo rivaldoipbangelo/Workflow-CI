@@ -12,18 +12,12 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # ✅ Dataset YouTube Comment (sesuai yang kamu kirim)
-      DATASET_DIR: MLProject/youtube_review_preprocessing
-      DATASET_FILE: youtube_comment_preprocessed.csv
-      DATASET_PATH_REPO: MLProject/youtube_comment_preprocessing/youtube_comment_preprocessed.csv
-
-      # ✅ Saat mlflow run ./MLProject, working dir = MLProject/
-      DATASET_PATH_PROJECT: youtube_comment_preprocessing/youtube_comment_preprocessed.csv
-
-      EXPERIMENT_NAME: youtube_comment_classification
-
-      # ✅ Ganti nama image biar sesuai project
-      IMAGE_NAME: youtube-comment-model
+      DATASET_DIR: MLProject/spiderman_youtube_review_preprocessing
+      DATASET_FILE: spiderman_youtube_review_preprocessed.csv
+      DATASET_PATH_REPO: MLProject/spiderman_youtube_review_preprocessing/spiderman_youtube_review_preprocessed.csv
+      DATASET_PATH_PROJECT: spiderman_youtube_review_preprocessing/spiderman_youtube_review_preprocessed.csv
+      EXPERIMENT_NAME: spiderman_review_classification
+      IMAGE_NAME: spiderman-review-model
 
     steps:
     - name: Checkout repository
